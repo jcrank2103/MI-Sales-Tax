@@ -1,10 +1,384 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>My First Site</title>
-</head>
-<body>
-    <h1>Welcome to My Site</h1>
-    <p>This is my first deployed app.</p>
-</body>
-</html>
+import React, { useMemo, useState } from "react";
+
+const EXEMPT_STATES = [
+  "Alaska",
+  "Delaware",
+  "Montana",
+  "New Hampshire",
+  "New Mexico",
+  "Oregon",
+];
+
+const NON_RECIPROCAL_STATES = [
+  "Arkansas",
+  "District of Columbia",
+  "Georgia",
+  "Maryland",
+  "Mississippi",
+  "Nebraska",
+  "North Carolina",
+  "Oklahoma",
+  "South Carolina",
+  "South Dakota",
+  "West Virginia",
+];
+
+const RECIPROCAL_STATES = {
+  Alabama: { rate: 0.02, tradeIn: "YES", notes: "2% for vehicles" },
+  Arizona: { rate: 0.056, tradeIn: "YES" },
+  California: { rate: 0.0725, tradeIn: "NO" },
+  Colorado: { rate: 0.029, tradeIn: "YES" },
+  Connecticut: { rate: 0.0635, tradeIn: "YES" },
+  Florida: { rate: 0.06, tradeIn: "YES" },
+  Hawaii: { rate: 0.04, tradeIn: "NO" },
+  Idaho: { rate: 0.06, tradeIn: "YES" },
+  Illinois: { rate: 0.0625, tradeIn: "YES" },
+  Indiana: { rate: 0.07, tradeIn: "YES" },
+  Iowa: { rate: 0.05, tradeIn: "YES", notes: "5% for vehicles" },
+  Kansas: { rate: 0.065, tradeIn: "YES" },
+  Kentucky: { rate: 0.06, tradeIn: "YES" },
+  Louisiana: { rate: 0.0445, tradeIn: "YES" },
+  Maine: { rate: 0.055, tradeIn: "YES" },
+  Massachusetts: { rate: 0.0625, tradeIn: "YES" },
+  Minnesota: { rate: 0.06875, tradeIn: "YES", notes: "6.875% for vehicles" },
+  Missouri: { rate: 0.04225, tradeIn: "YES" },
+  Nevada: { rate: 0.0685, tradeIn: "YES" },
+  "New Jersey": { rate: 0.06625, tradeIn: "YES" },
+  "New York": { rate: 0.04, tradeIn: "YES" },
+  "North Dakota": { rate: 0.05, tradeIn: "YES" },
+  Ohio: { rate: 0.0575, tradeIn: "YES_NEW_ONLY", notes: "new motor vehicle purchases only" },
+  Pennsylvania: { rate: 0.06, tradeIn: "YES" },
+  "Rhode Island": { rate: 0.07, tradeIn: "YES_PASSENGER_ONLY", notes: "passenger cars only" },
+  Tennessee: { rate: 0.07, tradeIn: "YES" },
+  Texas: { rate: 0.0625, tradeIn: "YES" },
+  Utah: { rate: 0.0485, tradeIn: "YES" },
+  Vermont: { rate: 0.06, tradeIn: "YES" },
+  Virginia: { rate: 0.0415, tradeIn: "NO", notes: "$75.00 minimum for vehicles" },
+  Washington: { rate: 0.065, tradeIn: "YES" },
+  Wisconsin: { rate: 0.05, tradeIn: "YES" },
+  Wyoming: { rate: 0.04, tradeIn: "YES" },
+};
+
+const ALL_STATES = [
+  ...Object.keys(RECIPROCAL_STATES),
+  ...EXEMPT_STATES,
+  ...NON_RECIPROCAL_STATES,
+].sort((a, b) => a.localeCompare(b));
+
+function formatCurrency(value) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+  }).format(Number(value || 0));
+}
+
+function formatPercent(value) {
+  return `${(value * 100).toFixed(2).replace(/\.00$/, "")}%`;
+}
+
+function getStateCategory(state) {
+  if (EXEMPT_STATES.includes(state)) return "Exempt";
+  if (NON_RECIPROCAL_STATES.includes(state)) return "Non-Reciprocal";
+  if (RECIPROCAL_STATES[state]) return "Reciprocal";
+  return "Unknown";
+}
+
+function homeStateTradeInAllowed(state, vehicleCondition, vehicleType) {
+  const data = RECIPROCAL_STATES[state];
+  if (!data) return false;
+  if (data.tradeIn === "YES") return true;
+  if (data.tradeIn === "NO") return false;
+  if (data.tradeIn === "YES_NEW_ONLY") return vehicleCondition === "new";
+  if (data.tradeIn === "YES_PASSENGER_ONLY") return vehicleType === "motor";
+  return false;
+}
+
+function getMichiganTradeInAllowance(vehicleType, tradeInValue) {
+  const tradeIn = Number(tradeInValue || 0);
+  if (vehicleType === "rv") return tradeIn;
+  return Math.min(tradeIn, 12000);
+}
+
+function Field({ label, children }) {
+  return (
+    <label className="block space-y-2">
+      <div className="text-sm font-medium text-slate-700">{label}</div>
+      {children}
+    </label>
+  );
+}
+
+function SelectField({ value, onChange, options }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm outline-none focus:border-slate-500"
+    >
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function NumberField({ value, onChange }) {
+  return (
+    <input
+      type="number"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm outline-none focus:border-slate-500"
+    />
+  );
+}
+
+export default function MichiganOutOfStateVehicleTaxCalculator() {
+  const [deliveryInMichigan, setDeliveryInMichigan] = useState("yes");
+  const [specialRegistrationIssued, setSpecialRegistrationIssued] = useState("yes");
+  const [vehicleType, setVehicleType] = useState("motor");
+  const [vehicleCondition, setVehicleCondition] = useState("used");
+  const [homeState, setHomeState] = useState("Indiana");
+  const [salesPrice, setSalesPrice] = useState("26000");
+  const [tradeInValue, setTradeInValue] = useState("12000");
+
+  const result = useMemo(() => {
+    const price = Number(salesPrice || 0);
+    const trade = Number(tradeInValue || 0);
+    const category = getStateCategory(homeState);
+
+    if (deliveryInMichigan === "no") {
+      return {
+        status: "No Michigan sales tax",
+        category,
+        reason: "Vehicle was first received outside Michigan. The sale is not subject to Michigan sales tax when delivery occurs outside Michigan.",
+        michiganTaxDue: 0,
+        effectiveRate: 0,
+        totalRemit: price,
+      };
+    }
+
+    if (specialRegistrationIssued === "no") {
+      const miTaxableBase = Math.max(price - getMichiganTradeInAllowance(vehicleType, trade), 0);
+      const michiganTaxDue = miTaxableBase * 0.06;
+      return {
+        status: "Michigan sales tax due",
+        category,
+        reason: "A 60-day in-transit registration was not issued, so Michigan sales tax applies.",
+        michiganTaxDue,
+        effectiveRate: price > 0 ? michiganTaxDue / price : 0,
+        totalRemit: price + michiganTaxDue,
+        homeStateTax: null,
+        miComparisonTax: michiganTaxDue,
+        miTaxableBase,
+      };
+    }
+
+    if (category === "Exempt" || category === "Non-Reciprocal") {
+      return {
+        status: "Exempt from Michigan sales tax",
+        category,
+        reason:
+          category === "Exempt"
+            ? "The home state is in the exempt category."
+            : "The home state is in the non-reciprocal category and the sale is exempt from Michigan sales tax.",
+        michiganTaxDue: 0,
+        effectiveRate: 0,
+        totalRemit: price,
+      };
+    }
+
+    const stateData = RECIPROCAL_STATES[homeState];
+    const miTradeAllowance = getMichiganTradeInAllowance(vehicleType, trade);
+    const homeTradeAllowed = homeStateTradeInAllowed(homeState, vehicleCondition, vehicleType);
+    const homeTradeAllowance = homeTradeAllowed ? trade : 0;
+
+    const homeTaxableBase = Math.max(price - homeTradeAllowance, 0);
+    let homeStateTax = homeTaxableBase * stateData.rate;
+    if (homeState === "Virginia") {
+      homeStateTax = Math.max(homeStateTax, 75);
+    }
+
+    const miTaxableBase = Math.max(price - miTradeAllowance, 0);
+    const miComparisonTax = miTaxableBase * 0.06;
+    const michiganTaxDue = Math.min(homeStateTax, miComparisonTax);
+
+    return {
+      status: "Michigan sales tax due",
+      category,
+      reason: "For reciprocal states, Michigan tax due is the lesser of the home-state tax calculation and the Michigan 6% comparison.",
+      michiganTaxDue,
+      effectiveRate: price > 0 ? michiganTaxDue / price : 0,
+      totalRemit: price + michiganTaxDue,
+      homeStateTax,
+      miComparisonTax,
+      homeTaxableBase,
+      miTaxableBase,
+      homeTradeAllowed,
+      homeTradeAllowance,
+      miTradeAllowance,
+      homeRate: stateData.rate,
+      notes: stateData.notes,
+    };
+  }, [deliveryInMichigan, specialRegistrationIssued, vehicleType, vehicleCondition, homeState, salesPrice, tradeInValue]);
+
+  const price = Number(salesPrice || 0);
+  const taxBarWidth = price > 0 ? Math.min((result.michiganTaxDue / price) * 100, 100) : 0;
+
+  return (
+    <div className="min-h-screen bg-slate-100 p-6 text-slate-900">
+      <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-3">
+        <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 lg:col-span-1">
+          <div className="mb-6">
+            <h1 className="text-2xl font-semibold">Michigan Out-of-State Vehicle Tax Calculator</h1>
+            <p className="mt-2 text-sm text-slate-600">Preview-safe version with native controls and the same decision logic.</p>
+          </div>
+
+          <div className="space-y-4">
+            <Field label="Home State">
+              <SelectField
+                value={homeState}
+                onChange={setHomeState}
+                options={ALL_STATES.map((state) => ({ value: state, label: state }))}
+              />
+            </Field>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="Vehicle Type">
+                <SelectField
+                  value={vehicleType}
+                  onChange={setVehicleType}
+                  options={[
+                    { value: "motor", label: "Motor Vehicle" },
+                    { value: "rv", label: "Recreational Vehicle" },
+                  ]}
+                />
+              </Field>
+              <Field label="Vehicle Condition">
+                <SelectField
+                  value={vehicleCondition}
+                  onChange={setVehicleCondition}
+                  options={[
+                    { value: "new", label: "New" },
+                    { value: "used", label: "Used" },
+                  ]}
+                />
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="Delivery Taken in Michigan?">
+                <SelectField
+                  value={deliveryInMichigan}
+                  onChange={setDeliveryInMichigan}
+                  options={[
+                    { value: "yes", label: "Yes" },
+                    { value: "no", label: "No" },
+                  ]}
+                />
+              </Field>
+              <Field label="60-Day In-Transit Registration Issued?">
+                <SelectField
+                  value={specialRegistrationIssued}
+                  onChange={setSpecialRegistrationIssued}
+                  options={[
+                    { value: "yes", label: "Yes" },
+                    { value: "no", label: "No" },
+                  ]}
+                />
+              </Field>
+            </div>
+
+            <Field label="Sales Price">
+              <NumberField value={salesPrice} onChange={setSalesPrice} />
+            </Field>
+
+            <Field label="Trade-In Value">
+              <NumberField value={tradeInValue} onChange={setTradeInValue} />
+            </Field>
+
+            <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
+              <div className="text-xs uppercase tracking-wide text-slate-500">State Classification</div>
+              <div className="mt-1 text-lg font-semibold">{getStateCategory(homeState)}</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-6 lg:col-span-2">
+          <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-medium text-white">{result.category}</span>
+              <span className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium">{result.status}</span>
+              <span className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium">Effective Rate: {formatPercent(result.effectiveRate || 0)}</span>
+            </div>
+
+            <div className="mt-6 grid gap-4 md:grid-cols-3">
+              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                <div className="text-sm text-slate-500">Sales Price</div>
+                <div className="mt-1 text-2xl font-semibold">{formatCurrency(price)}</div>
+              </div>
+              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                <div className="text-sm text-slate-500">Michigan Tax Due</div>
+                <div className="mt-1 text-2xl font-semibold">{formatCurrency(result.michiganTaxDue)}</div>
+              </div>
+              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                <div className="text-sm text-slate-500">Total to Remit</div>
+                <div className="mt-1 text-2xl font-semibold">{formatCurrency(result.totalRemit)}</div>
+              </div>
+            </div>
+
+            <div className="mt-6">
+              <div className="mb-2 flex items-center justify-between text-sm text-slate-600">
+                <span>Tax as % of Sale Price</span>
+                <span>{formatPercent(result.effectiveRate || 0)}</span>
+              </div>
+              <div className="h-4 overflow-hidden rounded-full bg-slate-200">
+                <div className="h-full rounded-full bg-slate-800 transition-all" style={{ width: `${taxBarWidth}%` }} />
+              </div>
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+              {result.reason}
+            </div>
+          </div>
+
+          <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+            <h2 className="text-xl font-semibold">Detailed Logic</h2>
+            {result.homeStateTax !== undefined && result.homeStateTax !== null ? (
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 p-4">
+                  <div className="mb-2 font-medium">Home State Calculation</div>
+                  <div className="space-y-1 text-sm text-slate-700">
+                    <div>Rate: {formatPercent(result.homeRate)}</div>
+                    <div>Trade-In Allowed: {result.homeTradeAllowed ? "Yes" : "No"}</div>
+                    <div>Trade-In Used: {formatCurrency(result.homeTradeAllowance || 0)}</div>
+                    <div>Taxable Base: {formatCurrency(result.homeTaxableBase || 0)}</div>
+                    <div>Tax Calculation: {formatCurrency(result.homeStateTax || 0)}</div>
+                    {result.notes ? <div className="text-slate-500">Note: {result.notes}</div> : null}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-slate-200 p-4">
+                  <div className="mb-2 font-medium">Michigan Comparison Calculation</div>
+                  <div className="space-y-1 text-sm text-slate-700">
+                    <div>Rate: 6%</div>
+                    <div>Michigan Trade-In Used: {formatCurrency(result.miTradeAllowance || 0)}</div>
+                    <div>Taxable Base: {formatCurrency(result.miTaxableBase || 0)}</div>
+                    <div>Tax Calculation: {formatCurrency(result.miComparisonTax || 0)}</div>
+                    <div className="pt-2 font-medium">Lesser Amount Due to Michigan: {formatCurrency(result.michiganTaxDue || 0)}</div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                No reciprocal comparison is required for this scenario.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
